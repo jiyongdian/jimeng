@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DFYue Fetch 管理面板</title>
-    <link rel="stylesheet" href="/admin/assets/styles.css?v=20260626-decoder-link" />
+    <link rel="stylesheet" href="/admin/assets/styles.css?v=20260627-toast-100ms-1" />
   </head>
   <body>
     <section class="login-screen" id="loginView">
@@ -70,8 +70,12 @@
             <span class="nav-symbol">03</span>
             <span>任务管理</span>
           </button>
-          <button class="nav-item" type="button" data-view="docs">
+          <button class="nav-item" type="button" data-view="quota" id="quotaNavItem">
             <span class="nav-symbol">04</span>
+            <span>额度控制</span>
+          </button>
+          <button class="nav-item" type="button" data-view="docs">
+            <span class="nav-symbol">05</span>
             <span>接口说明</span>
           </button>
         </nav>
@@ -121,29 +125,6 @@
             </div>
           </div>
 
-          <section class="panel dashboard-proxy-panel">
-            <div class="panel-header">
-              <div class="proxy-title-row">
-                <h2>代理配置</h2>
-                <span class="section-side-label">提取地址</span>
-              </div>
-              <div class="proxy-header-actions">
-                <span class="muted" id="configState">未读取</span>
-                <button class="secondary-button" id="loadProxyConfig" type="button">读取当前</button>
-                <button class="primary-button" id="saveProxyConfig" type="button">保存配置</button>
-              </div>
-            </div>
-
-            <label class="field proxy-url-field">
-              <span class="sr-only">提取地址</span>
-              <textarea id="proxyApiUrl" rows="5" spellcheck="false"></textarea>
-            </label>
-
-            <div class="proxy-notice">
-              <strong>提取地址说明</strong>
-              <span>请输入完整的 http 或 https 提取接口地址，接口返回内容应为单个代理地址，例如 <code>1.2.3.4:20000</code>。查询提取接口本身不走代理；保存后，新任务会使用新地址。</span>
-            </div>
-          </section>
         </section>
 
         <section class="view" id="submitView" data-title="提交任务">
@@ -226,6 +207,44 @@
                   </tr>
                 </thead>
                 <tbody id="taskTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="quotaView" data-title="额度控制">
+          <section class="panel quota-panel">
+            <div class="panel-header">
+              <div>
+                <h2>临时 Token</h2>
+              </div>
+              <div class="toolbar-actions">
+                <button class="secondary-button" id="refreshTempTokens" type="button" onclick="window.dfyueRefreshTempTokens?.()">刷新</button>
+                <button class="primary-button" id="openCreateTokenModal" type="button" onclick="window.dfyueOpenCreateTokenModal?.()">生成临时密钥</button>
+              </div>
+            </div>
+
+            <div class="table-wrap quota-table-wrap">
+              <table class="quota-table">
+                <colgroup>
+                  <col class="token-col" />
+                  <col class="quota-col" />
+                  <col class="used-col" />
+                  <col class="remain-col" />
+                  <col class="time-col" />
+                  <col class="quota-action-col" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>额度</th>
+                    <th>已用</th>
+                    <th>剩余</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="tempTokenTableBody"></tbody>
               </table>
             </div>
           </section>
@@ -465,6 +484,27 @@
         </div>
       </section>
     </div>
+    <div class="modal-backdrop hidden" id="createTokenModal" aria-hidden="true">
+      <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="createTokenModalTitle">
+        <div class="modal-header">
+          <h2 id="createTokenModalTitle">生成临时密钥</h2>
+          <button class="modal-close" id="closeCreateTokenModal" type="button" aria-label="关闭">×</button>
+        </div>
+        <label class="field">
+          <span>生成条数</span>
+          <input id="createTokenCount" type="number" min="1" max="200" step="1" value="1" />
+        </label>
+        <label class="field">
+          <span>每个额度</span>
+          <input id="createTokenLimit" type="number" min="1" max="100000" step="1" value="100" />
+        </label>
+        <div class="modal-actions">
+          <span class="sr-only" id="createTokenState"></span>
+          <button class="primary-button" id="confirmCreateTokens" type="button">生成</button>
+          <button class="secondary-button" id="cancelCreateTokenModal" type="button">取消</button>
+        </div>
+      </section>
+    </div>
     <div class="modal-backdrop hidden" id="textModal" aria-hidden="true">
       <section class="modal-panel text-modal-panel" role="dialog" aria-modal="true" aria-labelledby="textModalTitle">
         <div class="modal-header">
@@ -499,6 +539,6 @@
         </div>
       </section>
     </div>
-    <script src="/admin/assets/app.js?v=20260626-decoder-link"></script>
+    <script src="/admin/assets/app.js?v=20260627-toast-100ms-1"></script>
   </body>
 </html>

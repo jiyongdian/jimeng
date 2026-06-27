@@ -94,7 +94,7 @@ def ensure_storage() -> None:
         write_json(runtime, default_runtime())
 
 
-def create_task(prompt: str, ratio: str) -> dict[str, Any]:
+def create_task(prompt: str, ratio: str, owner_token_hash: str = "") -> dict[str, Any]:
     ensure_storage()
     for _ in range(20):
         task_id = secrets.token_hex(16)
@@ -108,6 +108,7 @@ def create_task(prompt: str, ratio: str) -> dict[str, Any]:
                 "ratio": ratio,
                 "status": STATUS_PENDING,
                 "image_count": 0,
+                "owner_token_hash": owner_token_hash,
                 "created_at": utc_now(),
                 "updated_at": utc_now(),
                 "error": "",
@@ -202,13 +203,15 @@ def task_image_paths(task_id: str) -> list[Path]:
     return sorted([p for p in root.iterdir() if p.is_file()])
 
 
-def list_tasks() -> list[dict[str, Any]]:
+def list_tasks(owner_token_hash: str | None = None) -> list[dict[str, Any]]:
     ensure_storage()
     items: list[dict[str, Any]] = []
     for path in sorted(TASKS_DIR.iterdir(), key=lambda p: p.stat().st_ctime if p.exists() else 0):
         if not path.is_dir() or not TASK_ID_RE.fullmatch(path.name):
             continue
         meta = read_json(path / "meta.json", {})
+        if owner_token_hash is not None and str(meta.get("owner_token_hash") or "") != owner_token_hash:
+            continue
         prompt = str(meta.get("prompt") or "")
         items.append(
             {
@@ -220,6 +223,7 @@ def list_tasks() -> list[dict[str, Any]]:
                 "status": str(meta.get("status") or ""),
                 "image_count": int(meta.get("image_count") or 0),
                 "error": str(meta.get("error") or ""),
+                "owner_token_hash": str(meta.get("owner_token_hash") or ""),
             }
         )
     return items
@@ -231,12 +235,12 @@ def delete_task(task_id: str) -> None:
         shutil.rmtree(root)
 
 
-def delete_inactive_tasks(active_ids: set[str] | None = None) -> dict[str, Any]:
+def delete_inactive_tasks(active_ids: set[str] | None = None, owner_token_hash: str | None = None) -> dict[str, Any]:
     ensure_storage()
     active = active_ids or set()
     deleted = 0
     skipped: list[str] = []
-    for item in list_tasks():
+    for item in list_tasks(owner_token_hash=owner_token_hash):
         task_id = item["id"]
         if task_id in active:
             skipped.append(task_id)

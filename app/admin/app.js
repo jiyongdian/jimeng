@@ -42,16 +42,23 @@ const els = {
   nextPage: document.getElementById("nextPage"),
   pageState: document.getElementById("pageState"),
   taskTableBody: document.getElementById("taskTableBody"),
-  loadProxyConfig: document.getElementById("loadProxyConfig"),
-  proxyApiUrl: document.getElementById("proxyApiUrl"),
-  saveProxyConfig: document.getElementById("saveProxyConfig"),
-  configState: document.getElementById("configState"),
+  quotaNavItem: document.getElementById("quotaNavItem"),
+  refreshTempTokens: document.getElementById("refreshTempTokens"),
+  openCreateTokenModal: document.getElementById("openCreateTokenModal"),
+  tempTokenTableBody: document.getElementById("tempTokenTableBody"),
   workersModal: document.getElementById("workersModal"),
   workersInput: document.getElementById("workersInput"),
   workersModalState: document.getElementById("workersModalState"),
   closeWorkersModal: document.getElementById("closeWorkersModal"),
   cancelWorkersModal: document.getElementById("cancelWorkersModal"),
   saveWorkers: document.getElementById("saveWorkers"),
+  createTokenModal: document.getElementById("createTokenModal"),
+  closeCreateTokenModal: document.getElementById("closeCreateTokenModal"),
+  cancelCreateTokenModal: document.getElementById("cancelCreateTokenModal"),
+  createTokenCount: document.getElementById("createTokenCount"),
+  createTokenLimit: document.getElementById("createTokenLimit"),
+  createTokenState: document.getElementById("createTokenState"),
+  confirmCreateTokens: document.getElementById("confirmCreateTokens"),
   textModal: document.getElementById("textModal"),
   textModalContent: document.getElementById("textModalContent"),
   closeTextModal: document.getElementById("closeTextModal"),
@@ -78,6 +85,8 @@ const state = {
   modalText: "",
   modalVideoUrl: "",
   submitting: false,
+  isTempToken: false,
+  tempTokens: [],
 };
 
 const MAX_IMAGE_COUNT = 9;
@@ -140,7 +149,7 @@ function toast(message, type = "info") {
   node.className = `toast ${type === "error" ? "error" : ""}`;
   node.textContent = message;
   els.toastStack.appendChild(node);
-  window.setTimeout(() => node.remove(), 4200);
+  window.setTimeout(() => node.remove(), 100);
 }
 
 function setBusy(button, busy, label) {
@@ -348,6 +357,9 @@ function logout() {
 }
 
 function switchView(name) {
+  if (name === "quota" && state.isTempToken) {
+    name = "dashboard";
+  }
   document.querySelectorAll(".nav-item").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === name);
   });
@@ -357,6 +369,7 @@ function switchView(name) {
     if (active && els.viewTitle) els.viewTitle.textContent = view.dataset.title || "";
   });
   if (name === "tasks" && !state.tasks.length) refreshTasks();
+  if (name === "quota" && !state.tempTokens.length) refreshTempTokens();
 }
 
 function updateDashboardMetrics() {
@@ -397,41 +410,13 @@ function updateDashboardMetrics() {
 async function refreshHealth() {
   const data = await apiFetch("/health");
   state.activeIds = Array.isArray(data.active) ? data.active : [];
+  state.isTempToken = Boolean(data.quota);
   els.metricWorkers.textContent = String(data.browser_workers ?? "-");
+  if (els.editWorkers) els.editWorkers.classList.toggle("hidden", state.isTempToken);
+  if (els.quotaNavItem) els.quotaNavItem.classList.toggle("hidden", state.isTempToken);
   setServiceState(true);
   updateDashboardMetrics();
   return data;
-}
-
-async function loadProxyConfig() {
-  const data = await apiFetch("/config/proxy-api");
-  els.proxyApiUrl.value = data.proxy_api_url || "";
-  els.configState.textContent = "已读取";
-  return data;
-}
-
-async function saveProxyConfig() {
-  const url = els.proxyApiUrl.value.trim();
-  if (!url) {
-    toast("提取地址不能为空", "error");
-    return;
-  }
-  setBusy(els.saveProxyConfig, true, "保存中");
-  try {
-    const data = await apiFetch("/config/proxy-api", {
-      method: "POST",
-      body: {
-        proxy_api_url: url,
-        proxy_api_scheme: "http",
-      },
-    });
-    els.configState.textContent = "已保存";
-    toast("代理 API 已更新");
-  } catch (error) {
-    toast(`保存失败：${error.message}`, "error");
-  } finally {
-    setBusy(els.saveProxyConfig, false);
-  }
 }
 
 function openWorkersModal() {
@@ -524,7 +509,6 @@ async function refreshDashboard() {
     const results = await Promise.allSettled([
       refreshHealth(),
       refreshTasks({ quiet: true }),
-      loadProxyConfig(),
     ]);
     const rejected = results.find((item) => item.status === "rejected");
     if (rejected) throw rejected.reason;
@@ -664,6 +648,130 @@ function renderTaskTable() {
       </tr>
     `;
   }).join("");
+}
+
+function renderTempTokenTable() {
+  if (!els.tempTokenTableBody) return;
+  if (!state.tempTokens.length) {
+    els.tempTokenTableBody.innerHTML = `<tr><td colspan="6"><div class="empty-state">暂无临时 Token</div></td></tr>`;
+    return;
+  }
+
+  els.tempTokenTableBody.innerHTML = state.tempTokens.map((item) => {
+    const token = String(item.token || "");
+    const tokenId = String(item.id || "");
+    const limit = Number(item.limit || 0);
+    const used = Number(item.used || 0);
+    const remaining = Number(item.remaining ?? Math.max(0, limit - used));
+    return `
+      <tr>
+        <td>
+          <div class="temp-token-cell">
+            <code title="${escapeHtml(token)}">${escapeHtml(token)}</code>
+            <button class="token-copy-button" type="button" data-action="copy-temp-token" data-id="${escapeHtml(tokenId)}">复制</button>
+          </div>
+        </td>
+        <td>
+          <input class="quota-limit-input" type="number" min="1" max="100000" step="1" value="${escapeHtml(limit)}" data-token-limit="${escapeHtml(tokenId)}" />
+        </td>
+        <td>${escapeHtml(used)}</td>
+        <td>${escapeHtml(remaining)}</td>
+        <td>${escapeHtml(formatTime(item.created_at))}</td>
+        <td>
+          <div class="row-actions quota-row-actions">
+            <button class="icon-button" type="button" data-action="save-temp-token" data-id="${escapeHtml(tokenId)}">保存</button>
+            <button class="danger-button" type="button" data-action="delete-temp-token" data-id="${escapeHtml(tokenId)}">删除</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function refreshTempTokens(options = {}) {
+  if (state.isTempToken) return;
+  if (!options.quiet) setBusy(els.refreshTempTokens, true, "刷新中");
+  try {
+    const data = await apiFetch("/temp-tokens");
+    state.tempTokens = Array.isArray(data.tokens) ? data.tokens : [];
+    renderTempTokenTable();
+    if (!options.quiet) toast(`已加载 ${state.tempTokens.length} 个临时 Token`);
+  } catch (error) {
+    if (!options.quiet) toast(`临时 Token 读取失败：${error.message}`, "error");
+    throw error;
+  } finally {
+    if (!options.quiet) setBusy(els.refreshTempTokens, false);
+  }
+}
+
+function openCreateTokenModal() {
+  els.createTokenCount.value = "1";
+  els.createTokenLimit.value = "100";
+  els.createTokenState.textContent = "";
+  els.createTokenModal.classList.remove("hidden");
+  els.createTokenModal.setAttribute("aria-hidden", "false");
+  els.createTokenCount.focus();
+  els.createTokenCount.select();
+}
+
+function closeCreateTokenModal() {
+  els.createTokenModal.classList.add("hidden");
+  els.createTokenModal.setAttribute("aria-hidden", "true");
+}
+
+async function createTempTokens() {
+  const count = Number.parseInt(els.createTokenCount.value, 10);
+  const limit = Number.parseInt(els.createTokenLimit.value, 10);
+  if (!Number.isInteger(count) || count < 1 || count > 200) {
+    toast("生成条数范围是 1 - 200", "error");
+    return;
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100000) {
+    toast("额度范围是 1 - 100000", "error");
+    return;
+  }
+
+  setBusy(els.confirmCreateTokens, true, "生成中");
+  try {
+    const data = await apiFetch("/temp-tokens", {
+      method: "POST",
+      body: { count, limit },
+    });
+    const created = Array.isArray(data.tokens) ? data.tokens.length : 0;
+    els.createTokenState.textContent = "已生成";
+    toast(`已生成 ${created} 个临时 Token`);
+    closeCreateTokenModal();
+    await refreshTempTokens({ quiet: true });
+  } catch (error) {
+    els.createTokenState.textContent = "生成失败";
+    toast(`生成失败：${error.message}`, "error");
+  } finally {
+    setBusy(els.confirmCreateTokens, false);
+  }
+}
+
+async function saveTempTokenLimit(tokenId) {
+  const input = Array.from(document.querySelectorAll("[data-token-limit]")).find((node) => node.dataset.tokenLimit === tokenId);
+  const limit = Number.parseInt(input?.value || "", 10);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100000) {
+    toast("额度范围是 1 - 100000", "error");
+    return;
+  }
+  await apiFetch(`/temp-tokens/${encodeURIComponent(tokenId)}`, {
+    method: "PATCH",
+    body: { limit },
+  });
+  toast("额度已保存");
+  await refreshTempTokens({ quiet: true });
+}
+
+async function deleteTempTokenById(tokenId) {
+  const item = state.tempTokens.find((token) => token.id === tokenId);
+  const ok = window.confirm(`确认删除这个临时 Token？\n${item?.token || tokenId}`);
+  if (!ok) return;
+  await apiFetch(`/temp-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" });
+  toast("临时 Token 已删除");
+  await refreshTempTokens({ quiet: true });
 }
 
 async function queryTask(id, options = {}) {
@@ -865,11 +973,33 @@ async function submitTask(event) {
 }
 
 async function copyText(value, label = "内容") {
+  const text = String(value || "");
+  if (!text) {
+    toast("没有可复制内容", "error");
+    return;
+  }
+
   try {
-    await navigator.clipboard.writeText(value);
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      if (!copied) throw new Error("copy command failed");
+    }
     toast(`${label}已复制`);
-  } catch (_) {
-    toast("复制失败", "error");
+  } catch (error) {
+    console.warn("copy failed", error);
+    toast("复制失败，请手动选择文本复制", "error");
   }
 }
 
@@ -887,6 +1017,10 @@ function downloadVideo(url, id) {
 }
 
 function bindEvents() {
+  window.dfyueRefreshTempTokens = () => refreshTempTokens();
+  window.dfyueOpenCreateTokenModal = () => openCreateTokenModal();
+  window.dfyueCreateTempTokens = () => createTempTokens();
+
   els.loginForm.addEventListener("submit", login);
   els.copyTokenCommand?.addEventListener("click", async () => {
     await copyText(els.tokenCommand?.value?.trim() || "", "命令行");
@@ -903,18 +1037,8 @@ function bindEvents() {
   els.refreshTasks.addEventListener("click", () => refreshTasks());
   els.queryVisibleTasks.addEventListener("click", queryVisibleTasks);
   els.clearTasks.addEventListener("click", clearTasks);
-  els.loadProxyConfig.addEventListener("click", async () => {
-    setBusy(els.loadProxyConfig, true, "读取中");
-    try {
-      await loadProxyConfig();
-      toast("代理配置已读取");
-    } catch (error) {
-      toast(`读取失败：${error.message}`, "error");
-    } finally {
-      setBusy(els.loadProxyConfig, false);
-    }
-  });
-  els.saveProxyConfig.addEventListener("click", saveProxyConfig);
+  els.refreshTempTokens?.addEventListener("click", () => refreshTempTokens());
+  els.openCreateTokenModal?.addEventListener("click", openCreateTokenModal);
   els.editWorkers.addEventListener("click", openWorkersModal);
   els.closeWorkersModal.addEventListener("click", closeWorkersModal);
   els.cancelWorkersModal.addEventListener("click", closeWorkersModal);
@@ -942,6 +1066,83 @@ function bindEvents() {
     if (event.key === "Escape") closeWorkersModal();
   });
   els.saveWorkers.addEventListener("click", saveWorkersConfig);
+  els.closeCreateTokenModal?.addEventListener("click", closeCreateTokenModal);
+  els.cancelCreateTokenModal?.addEventListener("click", closeCreateTokenModal);
+  els.createTokenModal?.addEventListener("click", (event) => {
+    if (event.target === els.createTokenModal) closeCreateTokenModal();
+  });
+  els.confirmCreateTokens?.addEventListener("click", createTempTokens);
+  els.createTokenCount?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") createTempTokens();
+    if (event.key === "Escape") closeCreateTokenModal();
+  });
+  els.createTokenLimit?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") createTempTokens();
+    if (event.key === "Escape") closeCreateTokenModal();
+  });
+
+  els.tempTokenTableBody?.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const id = button.dataset.id;
+    const action = button.dataset.action;
+    try {
+      if (action === "copy-temp-token") {
+        const item = state.tempTokens.find((token) => token.id === id);
+        if (item?.token) await copyText(item.token, "临时 Token");
+      }
+      if (action === "save-temp-token") {
+        setBusy(button, true, "保存中");
+        await saveTempTokenLimit(id);
+      }
+      if (action === "delete-temp-token") {
+        await deleteTempTokenById(id);
+      }
+    } catch (error) {
+      toast(`操作失败：${error.message}`, "error");
+    } finally {
+      if (action === "save-temp-token") setBusy(button, false);
+    }
+  });
+
+  document.addEventListener("click", async (event) => {
+    const target = event.target.closest("#refreshTempTokens, #openCreateTokenModal, #confirmCreateTokens, #tempTokenTableBody button[data-action]");
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (target.id === "refreshTempTokens") {
+      await refreshTempTokens();
+      return;
+    }
+    if (target.id === "openCreateTokenModal") {
+      openCreateTokenModal();
+      return;
+    }
+    if (target.id === "confirmCreateTokens") {
+      await createTempTokens();
+      return;
+    }
+
+    const id = target.dataset.id;
+    const action = target.dataset.action;
+    try {
+      if (action === "copy-temp-token") {
+        const item = state.tempTokens.find((token) => token.id === id);
+        if (item?.token) await copyText(item.token, "临时 Token");
+      }
+      if (action === "save-temp-token") {
+        setBusy(target, true, "保存中");
+        await saveTempTokenLimit(id);
+      }
+      if (action === "delete-temp-token") {
+        await deleteTempTokenById(id);
+      }
+    } catch (error) {
+      toast(`操作失败：${error.message}`, "error");
+    } finally {
+      if (action === "save-temp-token") setBusy(target, false);
+    }
+  }, true);
 
   els.ratioGroup.addEventListener("click", (event) => {
     const trigger = event.target.closest(".ratio-trigger");

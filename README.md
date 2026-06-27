@@ -365,6 +365,3 @@ cat /var/lib/dola-fetch-service/config.json
 ```bash
 find /var/lib/dola-fetch-service/tasks -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 ```
-
-
-
