@@ -4,6 +4,10 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/dola-fetch-service}"
 DATA_DIR="${DATA_DIR:-/var/lib/dola-fetch-service}"
 SERVICE_NAME="${SERVICE_NAME:-dola-fetch-service}"
+GITHUB_OWNER="${GITHUB_OWNER:-DaFangYue}"
+GITHUB_REPO="${GITHUB_REPO:-dola_fetch_service}"
+GITHUB_REF="${GITHUB_REF:-main}"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 REPO_ZIP_URL="${REPO_ZIP_URL:-}"
 DEFAULT_PROXY_API_URL="${DOLA_DEFAULT_PROXY_API_URL:-https://example.com/get-proxy?num=1&type=txt}"
 PYTHON_BIN=""
@@ -163,25 +167,63 @@ install_system_dependencies() {
   PYTHON_BIN="$(command -v python3)"
 }
 
+default_repo_zip_url() {
+  echo "https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/zipball/${GITHUB_REF}"
+}
+
+curl_to_file() {
+  local url="$1"
+  local output="$2"
+  local args=(-fL --retry 5 --retry-delay 2)
+  if [ -n "$GITHUB_TOKEN" ]; then
+    args+=(
+      -H "Authorization: Bearer ${GITHUB_TOKEN}"
+      -H "Accept: application/vnd.github+json"
+      -H "X-GitHub-Api-Version: 2022-11-28"
+    )
+  fi
+  curl "${args[@]}" "$url" -o "$output"
+}
+
+local_source_dir() {
+  local script_dir source_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)" || return 1
+  source_dir="$(cd "$script_dir/.." >/dev/null 2>&1 && pwd)" || return 1
+  if [ -f "$source_dir/run.py" ] && [ -d "$source_dir/app" ] && [ -f "$source_dir/requirements.txt" ]; then
+    echo "$source_dir"
+    return 0
+  fi
+  return 1
+}
+
 copy_source() {
   log "准备项目文件"
   mkdir -p "$APP_DIR" "$DATA_DIR"
 
-  if [ -n "$REPO_ZIP_URL" ]; then
-    log "下载项目压缩包"
+  local source_dir
+  source_dir=""
+  if [ -z "$REPO_ZIP_URL" ]; then
+    source_dir="$(local_source_dir || true)"
+  fi
+
+  if [ -n "$REPO_ZIP_URL" ] || [ -z "$source_dir" ]; then
+    local zip_url
+    zip_url="${REPO_ZIP_URL:-$(default_repo_zip_url)}"
+    log "下载项目压缩包：${GITHUB_OWNER}/${GITHUB_REPO}@${GITHUB_REF}"
+    if [ -n "$GITHUB_TOKEN" ]; then
+      log "使用 GITHUB_TOKEN 访问私有仓库"
+    fi
     local tmp_dir source_dir
     tmp_dir="$(mktemp -d)"
     trap 'rm -rf "$tmp_dir"' EXIT
-    curl -fL --retry 5 --retry-delay 2 "$REPO_ZIP_URL" -o "$tmp_dir/source.zip" || die "项目压缩包下载失败"
+    curl_to_file "$zip_url" "$tmp_dir/source.zip" || die "项目压缩包下载失败"
     unzip -q "$tmp_dir/source.zip" -d "$tmp_dir/source"
     source_dir="$(find "$tmp_dir/source" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
     [ -n "$source_dir" ] || die "压缩包内容不正确，未找到项目目录"
     find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     cp -a "$source_dir"/. "$APP_DIR"/
   else
-    local script_dir source_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source_dir="$(cd "$script_dir/.." && pwd)"
+    log "使用本地项目目录：$source_dir"
     if [ "$source_dir" != "$APP_DIR" ]; then
       find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
       cp -a "$source_dir"/. "$APP_DIR"/
